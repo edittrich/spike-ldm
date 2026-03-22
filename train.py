@@ -27,6 +27,8 @@ from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model
 from trl import SFTTrainer, SFTConfig
+from data_wikisql import load_wikisql_pairs
+from data_atis import build_atis_pairs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -448,12 +450,26 @@ print(f"  Spider pairs: {len(spider_pairs)}")
 print("\nBuilding multi-interface training pairs...")
 multi_pairs = build_multi_interface_pairs(MULTI_INTERFACE_EXAMPLES, repeat=50)
 
-# Combine and shuffle both sources
-all_pairs = spider_pairs[::2] + multi_pairs  # use every 2nd Spider pair to balance dataset
+print("\nLoading WikiSQL pairs...")
+wikisql_pairs = load_wikisql_pairs(max_tables=500, token=token)
+
+print("\nBuilding ATIS pairs...")
+atis_pairs = build_atis_pairs(repeat=20)
+
+# Combine all sources and shuffle
+# Spider:    ~83 pairs  (single flat interface, entity structure)
+# Synthetic:  500 pairs (multi-interface, FK detection by field name)
+# WikiSQL:   ~500 pairs (single flat interface, varied real-world domains)
+# ATIS:       ~60 pairs (multi-table aviation domain, complex FKs)
+all_pairs = spider_pairs[::2] + multi_pairs + wikisql_pairs + atis_pairs
 random.seed(42)
 random.shuffle(all_pairs)
 
-print(f"\n  Total training pairs: {len(all_pairs)}")
+print(f"\n  Spider pairs   : {len(spider_pairs[::2])}")
+print(f"  Synthetic pairs: {len(multi_pairs)}")
+print(f"  WikiSQL pairs  : {len(wikisql_pairs)}")
+print(f"  ATIS pairs     : {len(atis_pairs)}")
+print(f"  Total          : {len(all_pairs)}")
 print("\n--- Spider sample input ---")
 print(spider_pairs[0]["input"])
 print("\n--- Multi-interface sample input ---")
