@@ -11,9 +11,10 @@ loading script which is no longer supported.
 Source: https://huggingface.co/datasets/Salesforce/wikisql
 """
 
-from datasets import load_dataset
 import json
 import random
+
+from datasets import load_dataset
 
 
 def load_wikisql_pairs(
@@ -71,8 +72,8 @@ def load_wikisql_pairs(
         # Extract table fields depending on format
         if isinstance(table, dict):
             table_id = table.get("id", str(len(pairs)))
-            headers  = table.get("header", [])
-            types    = table.get("types", ["text"] * len(headers))
+            headers = table.get("header", [])
+            types = table.get("types", ["text"] * len(headers))
         else:
             # mlx-community mirror has flat structure
             continue
@@ -85,16 +86,13 @@ def load_wikisql_pairs(
         table_name = f"table_{table_id.replace('-', '_')}"
 
         # Flat input: all columns as a single interface
-        flat_input = (
-            f"Interface: {table_name}\n"
-            f"Fields: {', '.join(headers)}"
-        )
+        flat_input = f"Interface: {table_name}\nFields: {', '.join(headers)}"
 
         # Normalized output: single entity, first column as PK
         type_map = {"text": "text", "real": "number", "integer": "number"}
         attributes = []
         for i, (col, col_type) in enumerate(zip(headers, types)):
-            mtype      = type_map.get(str(col_type).lower(), "text")
+            mtype = type_map.get(str(col_type).lower(), "text")
             annotation = " (PK)" if i == 0 else ""
             attributes.append(f"{col}: {mtype}{annotation}")
 

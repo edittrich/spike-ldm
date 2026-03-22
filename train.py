@@ -21,15 +21,16 @@ os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import json
 import random
-import torch
-from dotenv import load_dotenv
-from datasets import load_dataset, Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer, SFTConfig
-from data_wikisql import load_wikisql_pairs
-from data_atis import build_atis_pairs
 
+import torch
+from datasets import Dataset, load_dataset
+from dotenv import load_dotenv
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from trl import SFTConfig, SFTTrainer
+
+from data_atis import build_atis_pairs
+from data_wikisql import load_wikisql_pairs
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Environment & Authentication
@@ -64,6 +65,7 @@ print(f"  Columns          : {spider_ds.column_names}")
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Spider Schema Parsing Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def parse_schema_text(schema_text: str) -> dict[str, list[tuple[str, str]]]:
     """
@@ -177,7 +179,6 @@ def schema_to_normalized_output(row: dict) -> str:
 # Each entry is a tuple of (input_text, output_json_dict)
 # The input uses the multi-interface format the user wants to provide.
 MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
-
     # ── E-Commerce ────────────────────────────────────────────────────────────
     (
         "Interface: product\nFields: id, name, price\n"
@@ -185,18 +186,31 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: order\nFields: id, product, customer, quantity, date",
         {
             "entities": [
-                {"name": "product",  "attributes": ["id: number (PK)", "name: text", "price: number"]},
-                {"name": "customer", "attributes": ["id: number (PK)", "name: text", "email: text"]},
-                {"name": "order",    "attributes": ["id: number (PK)", "product: number (FK)",
-                                                    "customer: number (FK)", "quantity: number", "date: text"]},
+                {
+                    "name": "product",
+                    "attributes": ["id: number (PK)", "name: text", "price: number"],
+                },
+                {
+                    "name": "customer",
+                    "attributes": ["id: number (PK)", "name: text", "email: text"],
+                },
+                {
+                    "name": "order",
+                    "attributes": [
+                        "id: number (PK)",
+                        "product: number (FK)",
+                        "customer: number (FK)",
+                        "quantity: number",
+                        "date: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "order", "to": "product",  "type": "N:1"},
+                {"from": "order", "to": "product", "type": "N:1"},
                 {"from": "order", "to": "customer", "type": "N:1"},
             ],
         },
     ),
-
     # ── Blog Platform ─────────────────────────────────────────────────────────
     (
         "Interface: author\nFields: id, name, email\n"
@@ -204,19 +218,29 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: post\nFields: id, title, body, author, category, created_at",
         {
             "entities": [
-                {"name": "author",   "attributes": ["id: number (PK)", "name: text", "email: text"]},
+                {
+                    "name": "author",
+                    "attributes": ["id: number (PK)", "name: text", "email: text"],
+                },
                 {"name": "category", "attributes": ["id: number (PK)", "name: text"]},
-                {"name": "post",     "attributes": ["id: number (PK)", "title: text", "body: text",
-                                                    "author: number (FK)", "category: number (FK)",
-                                                    "created_at: text"]},
+                {
+                    "name": "post",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "body: text",
+                        "author: number (FK)",
+                        "category: number (FK)",
+                        "created_at: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "post", "to": "author",   "type": "N:1"},
+                {"from": "post", "to": "author", "type": "N:1"},
                 {"from": "post", "to": "category", "type": "N:1"},
             ],
         },
     ),
-
     # ── Hospital ──────────────────────────────────────────────────────────────
     (
         "Interface: doctor\nFields: id, name, specialty\n"
@@ -224,18 +248,31 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: appointment\nFields: id, doctor, patient, date, diagnosis",
         {
             "entities": [
-                {"name": "doctor",      "attributes": ["id: number (PK)", "name: text", "specialty: text"]},
-                {"name": "patient",     "attributes": ["id: number (PK)", "name: text", "birthdate: text"]},
-                {"name": "appointment", "attributes": ["id: number (PK)", "doctor: number (FK)",
-                                                       "patient: number (FK)", "date: text", "diagnosis: text"]},
+                {
+                    "name": "doctor",
+                    "attributes": ["id: number (PK)", "name: text", "specialty: text"],
+                },
+                {
+                    "name": "patient",
+                    "attributes": ["id: number (PK)", "name: text", "birthdate: text"],
+                },
+                {
+                    "name": "appointment",
+                    "attributes": [
+                        "id: number (PK)",
+                        "doctor: number (FK)",
+                        "patient: number (FK)",
+                        "date: text",
+                        "diagnosis: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "appointment", "to": "doctor",  "type": "N:1"},
+                {"from": "appointment", "to": "doctor", "type": "N:1"},
                 {"from": "appointment", "to": "patient", "type": "N:1"},
             ],
         },
     ),
-
     # ── School ────────────────────────────────────────────────────────────────
     (
         "Interface: student\nFields: id, name, birthdate\n"
@@ -244,20 +281,40 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: enrollment\nFields: id, student, course, grade, semester",
         {
             "entities": [
-                {"name": "student",    "attributes": ["id: number (PK)", "name: text", "birthdate: text"]},
-                {"name": "teacher",    "attributes": ["id: number (PK)", "name: text", "subject: text"]},
-                {"name": "course",     "attributes": ["id: number (PK)", "name: text", "teacher: number (FK)"]},
-                {"name": "enrollment", "attributes": ["id: number (PK)", "student: number (FK)",
-                                                      "course: number (FK)", "grade: text", "semester: text"]},
+                {
+                    "name": "student",
+                    "attributes": ["id: number (PK)", "name: text", "birthdate: text"],
+                },
+                {
+                    "name": "teacher",
+                    "attributes": ["id: number (PK)", "name: text", "subject: text"],
+                },
+                {
+                    "name": "course",
+                    "attributes": [
+                        "id: number (PK)",
+                        "name: text",
+                        "teacher: number (FK)",
+                    ],
+                },
+                {
+                    "name": "enrollment",
+                    "attributes": [
+                        "id: number (PK)",
+                        "student: number (FK)",
+                        "course: number (FK)",
+                        "grade: text",
+                        "semester: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "course",      "to": "teacher", "type": "N:1"},
-                {"from": "enrollment",  "to": "student", "type": "N:1"},
-                {"from": "enrollment",  "to": "course",  "type": "N:1"},
+                {"from": "course", "to": "teacher", "type": "N:1"},
+                {"from": "enrollment", "to": "student", "type": "N:1"},
+                {"from": "enrollment", "to": "course", "type": "N:1"},
             ],
         },
     ),
-
     # ── Library ───────────────────────────────────────────────────────────────
     (
         "Interface: book\nFields: id, title, isbn, author\n"
@@ -266,21 +323,41 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: loan\nFields: id, book, member, loan_date, return_date",
         {
             "entities": [
-                {"name": "book",   "attributes": ["id: number (PK)", "title: text", "isbn: text",
-                                                  "author: number (FK)"]},
-                {"name": "author", "attributes": ["id: number (PK)", "name: text", "country: text"]},
-                {"name": "member", "attributes": ["id: number (PK)", "name: text", "email: text"]},
-                {"name": "loan",   "attributes": ["id: number (PK)", "book: number (FK)",
-                                                  "member: number (FK)", "loan_date: text", "return_date: text"]},
+                {
+                    "name": "book",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "isbn: text",
+                        "author: number (FK)",
+                    ],
+                },
+                {
+                    "name": "author",
+                    "attributes": ["id: number (PK)", "name: text", "country: text"],
+                },
+                {
+                    "name": "member",
+                    "attributes": ["id: number (PK)", "name: text", "email: text"],
+                },
+                {
+                    "name": "loan",
+                    "attributes": [
+                        "id: number (PK)",
+                        "book: number (FK)",
+                        "member: number (FK)",
+                        "loan_date: text",
+                        "return_date: text",
+                    ],
+                },
             ],
             "relations": [
                 {"from": "book", "to": "author", "type": "N:1"},
-                {"from": "loan", "to": "book",   "type": "N:1"},
+                {"from": "loan", "to": "book", "type": "N:1"},
                 {"from": "loan", "to": "member", "type": "N:1"},
             ],
         },
     ),
-
     # ── Project Management ────────────────────────────────────────────────────
     (
         "Interface: employee\nFields: id, name, department\n"
@@ -288,21 +365,38 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: task\nFields: id, title, project, assignee, status, due_date",
         {
             "entities": [
-                {"name": "employee", "attributes": ["id: number (PK)", "name: text", "department: text"]},
-                {"name": "project",  "attributes": ["id: number (PK)", "name: text", "budget: number",
-                                                    "manager: number (FK)"]},
-                {"name": "task",     "attributes": ["id: number (PK)", "title: text",
-                                                    "project: number (FK)", "assignee: number (FK)",
-                                                    "status: text", "due_date: text"]},
+                {
+                    "name": "employee",
+                    "attributes": ["id: number (PK)", "name: text", "department: text"],
+                },
+                {
+                    "name": "project",
+                    "attributes": [
+                        "id: number (PK)",
+                        "name: text",
+                        "budget: number",
+                        "manager: number (FK)",
+                    ],
+                },
+                {
+                    "name": "task",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "project: number (FK)",
+                        "assignee: number (FK)",
+                        "status: text",
+                        "due_date: text",
+                    ],
+                },
             ],
             "relations": [
                 {"from": "project", "to": "employee", "type": "N:1"},
-                {"from": "task",    "to": "project",  "type": "N:1"},
-                {"from": "task",    "to": "employee", "type": "N:1"},
+                {"from": "task", "to": "project", "type": "N:1"},
+                {"from": "task", "to": "employee", "type": "N:1"},
             ],
         },
     ),
-
     # ── Music Streaming ───────────────────────────────────────────────────────
     (
         "Interface: artist\nFields: id, name, genre\n"
@@ -310,19 +404,36 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: track\nFields: id, title, album, duration, plays",
         {
             "entities": [
-                {"name": "artist", "attributes": ["id: number (PK)", "name: text", "genre: text"]},
-                {"name": "album",  "attributes": ["id: number (PK)", "title: text",
-                                                  "artist: number (FK)", "release_year: number"]},
-                {"name": "track",  "attributes": ["id: number (PK)", "title: text",
-                                                  "album: number (FK)", "duration: number", "plays: number"]},
+                {
+                    "name": "artist",
+                    "attributes": ["id: number (PK)", "name: text", "genre: text"],
+                },
+                {
+                    "name": "album",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "artist: number (FK)",
+                        "release_year: number",
+                    ],
+                },
+                {
+                    "name": "track",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "album: number (FK)",
+                        "duration: number",
+                        "plays: number",
+                    ],
+                },
             ],
             "relations": [
                 {"from": "album", "to": "artist", "type": "N:1"},
-                {"from": "track", "to": "album",  "type": "N:1"},
+                {"from": "track", "to": "album", "type": "N:1"},
             ],
         },
     ),
-
     # ── Inventory ─────────────────────────────────────────────────────────────
     (
         "Interface: supplier\nFields: id, name, country\n"
@@ -331,21 +442,44 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: stock\nFields: id, product, warehouse, quantity",
         {
             "entities": [
-                {"name": "supplier",  "attributes": ["id: number (PK)", "name: text", "country: text"]},
-                {"name": "warehouse", "attributes": ["id: number (PK)", "location: text", "capacity: number"]},
-                {"name": "product",   "attributes": ["id: number (PK)", "name: text",
-                                                     "supplier: number (FK)", "price: number"]},
-                {"name": "stock",     "attributes": ["id: number (PK)", "product: number (FK)",
-                                                     "warehouse: number (FK)", "quantity: number"]},
+                {
+                    "name": "supplier",
+                    "attributes": ["id: number (PK)", "name: text", "country: text"],
+                },
+                {
+                    "name": "warehouse",
+                    "attributes": [
+                        "id: number (PK)",
+                        "location: text",
+                        "capacity: number",
+                    ],
+                },
+                {
+                    "name": "product",
+                    "attributes": [
+                        "id: number (PK)",
+                        "name: text",
+                        "supplier: number (FK)",
+                        "price: number",
+                    ],
+                },
+                {
+                    "name": "stock",
+                    "attributes": [
+                        "id: number (PK)",
+                        "product: number (FK)",
+                        "warehouse: number (FK)",
+                        "quantity: number",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "product", "to": "supplier",  "type": "N:1"},
-                {"from": "stock",   "to": "product",   "type": "N:1"},
-                {"from": "stock",   "to": "warehouse", "type": "N:1"},
+                {"from": "product", "to": "supplier", "type": "N:1"},
+                {"from": "stock", "to": "product", "type": "N:1"},
+                {"from": "stock", "to": "warehouse", "type": "N:1"},
             ],
         },
     ),
-
     # ── Forum ─────────────────────────────────────────────────────────────────
     (
         "Interface: user\nFields: id, username, email\n"
@@ -353,20 +487,38 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: reply\nFields: id, thread, user, body, created_at",
         {
             "entities": [
-                {"name": "user",   "attributes": ["id: number (PK)", "username: text", "email: text"]},
-                {"name": "thread", "attributes": ["id: number (PK)", "title: text", "user: number (FK)",
-                                                  "category: text", "created_at: text"]},
-                {"name": "reply",  "attributes": ["id: number (PK)", "thread: number (FK)",
-                                                  "user: number (FK)", "body: text", "created_at: text"]},
+                {
+                    "name": "user",
+                    "attributes": ["id: number (PK)", "username: text", "email: text"],
+                },
+                {
+                    "name": "thread",
+                    "attributes": [
+                        "id: number (PK)",
+                        "title: text",
+                        "user: number (FK)",
+                        "category: text",
+                        "created_at: text",
+                    ],
+                },
+                {
+                    "name": "reply",
+                    "attributes": [
+                        "id: number (PK)",
+                        "thread: number (FK)",
+                        "user: number (FK)",
+                        "body: text",
+                        "created_at: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "thread", "to": "user",   "type": "N:1"},
-                {"from": "reply",  "to": "thread", "type": "N:1"},
-                {"from": "reply",  "to": "user",   "type": "N:1"},
+                {"from": "thread", "to": "user", "type": "N:1"},
+                {"from": "reply", "to": "thread", "type": "N:1"},
+                {"from": "reply", "to": "user", "type": "N:1"},
             ],
         },
     ),
-
     # ── Real Estate ───────────────────────────────────────────────────────────
     (
         "Interface: agent\nFields: id, name, license_number\n"
@@ -375,18 +527,43 @@ MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
         "Interface: offer\nFields: id, property, buyer, amount, status, date",
         {
             "entities": [
-                {"name": "agent",    "attributes": ["id: number (PK)", "name: text", "license_number: text"]},
-                {"name": "property", "attributes": ["id: number (PK)", "address: text", "price: number",
-                                                    "agent: number (FK)"]},
-                {"name": "buyer",    "attributes": ["id: number (PK)", "name: text", "email: text"]},
-                {"name": "offer",    "attributes": ["id: number (PK)", "property: number (FK)",
-                                                    "buyer: number (FK)", "amount: number",
-                                                    "status: text", "date: text"]},
+                {
+                    "name": "agent",
+                    "attributes": [
+                        "id: number (PK)",
+                        "name: text",
+                        "license_number: text",
+                    ],
+                },
+                {
+                    "name": "property",
+                    "attributes": [
+                        "id: number (PK)",
+                        "address: text",
+                        "price: number",
+                        "agent: number (FK)",
+                    ],
+                },
+                {
+                    "name": "buyer",
+                    "attributes": ["id: number (PK)", "name: text", "email: text"],
+                },
+                {
+                    "name": "offer",
+                    "attributes": [
+                        "id: number (PK)",
+                        "property: number (FK)",
+                        "buyer: number (FK)",
+                        "amount: number",
+                        "status: text",
+                        "date: text",
+                    ],
+                },
             ],
             "relations": [
-                {"from": "property", "to": "agent",    "type": "N:1"},
-                {"from": "offer",    "to": "property", "type": "N:1"},
-                {"from": "offer",    "to": "buyer",    "type": "N:1"},
+                {"from": "property", "to": "agent", "type": "N:1"},
+                {"from": "offer", "to": "property", "type": "N:1"},
+                {"from": "offer", "to": "buyer", "type": "N:1"},
             ],
         },
     ),
@@ -416,16 +593,23 @@ def build_multi_interface_pairs(
             # Shuffle entity attribute order slightly so the model generalizes
             shuffled = output_dict.copy()
             shuffled["entities"] = [
-                {**e, "attributes": random.sample(e["attributes"], len(e["attributes"]))}
+                {
+                    **e,
+                    "attributes": random.sample(e["attributes"], len(e["attributes"])),
+                }
                 for e in output_dict["entities"]
             ]
-            pairs.append({
-                "input":  flat_input,
-                "output": json.dumps(shuffled, indent=2, ensure_ascii=False),
-            })
+            pairs.append(
+                {
+                    "input": flat_input,
+                    "output": json.dumps(shuffled, indent=2, ensure_ascii=False),
+                }
+            )
 
-    print(f"  Multi-interface pairs generated: {len(pairs)} "
-          f"({len(examples)} templates × {repeat} repeats)")
+    print(
+        f"  Multi-interface pairs generated: {len(pairs)} "
+        f"({len(examples)} templates × {repeat} repeats)"
+    )
     return pairs
 
 
@@ -438,10 +622,12 @@ spider_pairs: list[dict] = []
 
 for row in spider_ds:
     try:
-        spider_pairs.append({
-            "input":  schema_to_flat_input(row),
-            "output": schema_to_normalized_output(row),
-        })
+        spider_pairs.append(
+            {
+                "input": schema_to_flat_input(row),
+                "output": schema_to_normalized_output(row),
+            }
+        )
     except Exception as exc:
         print(f"  Skipping '{row.get('db_id', '?')}': {exc}")
 
@@ -530,7 +716,7 @@ bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True,        # nested quantization saves ~0.4 GB
+    bnb_4bit_use_double_quant=True,  # nested quantization saves ~0.4 GB
 )
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, token=token)
@@ -544,7 +730,7 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     token=token,
 )
-model.config.use_cache = False             # required for gradient checkpointing
+model.config.use_cache = False  # required for gradient checkpointing
 model.config.pad_token_id = tokenizer.pad_token_id
 
 
@@ -553,8 +739,8 @@ model.config.pad_token_id = tokenizer.pad_token_id
 # ─────────────────────────────────────────────────────────────────────────────
 
 lora_config = LoraConfig(
-    r=16,                                               # LoRA rank
-    lora_alpha=32,                                      # scaling factor
+    r=16,  # LoRA rank
+    lora_alpha=32,  # scaling factor
     target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
     lora_dropout=0.05,
     bias="none",
@@ -576,7 +762,7 @@ training_args = SFTConfig(
     output_dir="./ldm-expert-lora",
     num_train_epochs=5,
     per_device_train_batch_size=1,
-    gradient_accumulation_steps=16,        # effective batch size = 16
+    gradient_accumulation_steps=16,  # effective batch size = 16
     learning_rate=2e-4,
     warmup_steps=10,
     lr_scheduler_type="cosine",
@@ -585,10 +771,10 @@ training_args = SFTConfig(
     save_strategy="epoch",
     eval_strategy="epoch",
     load_best_model_at_end=True,
-    report_to="none",                      # set to "wandb" for experiment tracking
+    report_to="none",  # set to "wandb" for experiment tracking
     dataset_text_field="text",
     max_length=512,
-    gradient_checkpointing=True,           # trades compute for memory savings
+    gradient_checkpointing=True,  # trades compute for memory savings
 )
 
 trainer = SFTTrainer(
@@ -612,13 +798,10 @@ print("Model saved to: ./ldm-expert-lora/final")
 # 10. Inference Test
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def predict(flat_input: str) -> str:
     """Run inference on a flat interface description and return the data model JSON."""
-    prompt = (
-        f"<|system|>\n{SYSTEM_PROMPT}\n"
-        f"<|user|>\n{flat_input}\n"
-        f"<|assistant|>\n"
-    )
+    prompt = f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{flat_input}\n<|assistant|>\n"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         outputs = model.generate(

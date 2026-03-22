@@ -16,7 +16,6 @@ encode the known ATIS schema directly as high-quality training pairs.
 import json
 import random
 
-
 # ── ATIS Database Schema (well-known, manually encoded) ──────────────────────
 # Source: https://github.com/jkkummerfeld/text2sql-data
 # The ATIS schema has 25+ tables. We include the most important ones.
@@ -123,14 +122,14 @@ ATIS_SCHEMA = {
         },
     ],
     "relations": [
-        {"from": "flight",      "to": "airline",  "type": "N:1"},
-        {"from": "flight",      "to": "airport",  "type": "N:1"},
-        {"from": "flight",      "to": "aircraft", "type": "N:1"},
-        {"from": "fare",        "to": "airport",  "type": "N:1"},
-        {"from": "fare",        "to": "airline",  "type": "N:1"},
-        {"from": "flight_fare", "to": "flight",   "type": "N:1"},
-        {"from": "flight_fare", "to": "fare",     "type": "N:1"},
-        {"from": "fare",        "to": "restriction", "type": "N:1"},
+        {"from": "flight", "to": "airline", "type": "N:1"},
+        {"from": "flight", "to": "airport", "type": "N:1"},
+        {"from": "flight", "to": "aircraft", "type": "N:1"},
+        {"from": "fare", "to": "airport", "type": "N:1"},
+        {"from": "fare", "to": "airline", "type": "N:1"},
+        {"from": "flight_fare", "to": "flight", "type": "N:1"},
+        {"from": "flight_fare", "to": "fare", "type": "N:1"},
+        {"from": "fare", "to": "restriction", "type": "N:1"},
     ],
 }
 
@@ -150,8 +149,8 @@ def build_atis_pairs(repeat: int = 20) -> list[dict]:
     """
     pairs: list[dict] = []
     random.seed(42)
-    entities   = ATIS_SCHEMA["entities"]
-    relations  = ATIS_SCHEMA["relations"]
+    entities = ATIS_SCHEMA["entities"]
+    relations = ATIS_SCHEMA["relations"]
     entity_map = {e["name"]: e for e in entities}
 
     # ── Full schema pair ──────────────────────────────────────────────────────
@@ -167,13 +166,16 @@ def build_atis_pairs(repeat: int = 20) -> list[dict]:
             {**e, "attributes": random.sample(e["attributes"], len(e["attributes"]))}
             for e in shuffled_entities
         ]
-        pairs.append({
-            "input":  flat_input,
-            "output": json.dumps(
-                {"entities": output_entities, "relations": relations},
-                indent=2, ensure_ascii=False
-            ),
-        })
+        pairs.append(
+            {
+                "input": flat_input,
+                "output": json.dumps(
+                    {"entities": output_entities, "relations": relations},
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            }
+        )
 
     # ── Subset pairs: 2-4 tables at a time ───────────────────────────────────
     for _ in range(repeat * 2):
@@ -183,7 +185,8 @@ def build_atis_pairs(repeat: int = 20) -> list[dict]:
 
         # Only keep relations where both tables are in the subset
         subset_relations = [
-            r for r in relations
+            r
+            for r in relations
             if r["from"] in subset_names and r["to"] in subset_names
         ]
 
@@ -192,13 +195,16 @@ def build_atis_pairs(repeat: int = 20) -> list[dict]:
             fields = [a.split(":")[0].strip() for a in e["attributes"]]
             flat_parts.append(f"Interface: {e['name']}\nFields: {', '.join(fields)}")
 
-        pairs.append({
-            "input":  "\n".join(flat_parts),
-            "output": json.dumps(
-                {"entities": subset, "relations": subset_relations},
-                indent=2, ensure_ascii=False
-            ),
-        })
+        pairs.append(
+            {
+                "input": "\n".join(flat_parts),
+                "output": json.dumps(
+                    {"entities": subset, "relations": subset_relations},
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            }
+        )
 
     print(f"  ATIS pairs generated: {len(pairs)}")
     return pairs

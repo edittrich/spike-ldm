@@ -13,14 +13,14 @@ Usage:
     uv run python inference.py --output my_diagram.mmd
 """
 
-import os
 import argparse
 import json
+import os
+
 import torch
 from dotenv import load_dotenv
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import PeftModel
-
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Configuration
@@ -30,7 +30,7 @@ load_dotenv()
 token = os.getenv("HF_TOKEN")
 
 BASE_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-ADAPTER_PATH  = "./ldm-expert-lora/final"
+ADAPTER_PATH = "./ldm-expert-lora/final"
 
 SYSTEM_PROMPT = (
     "You are a database architect. "
@@ -44,6 +44,7 @@ SYSTEM_PROMPT = (
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Load Model & Adapter
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def load_model():
     print(f"Loading base model  : {BASE_MODEL_ID}")
@@ -82,6 +83,7 @@ def load_model():
 # 2. Inference
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def predict(model, tokenizer, flat_input: str) -> dict:
     """
     Run inference on a flat interface description.
@@ -89,11 +91,7 @@ def predict(model, tokenizer, flat_input: str) -> dict:
     Returns a parsed JSON dict with 'entities' and 'relations',
     or a dict with 'raw' key on parse failure.
     """
-    prompt = (
-        f"<|system|>\n{SYSTEM_PROMPT}\n"
-        f"<|user|>\n{flat_input}\n"
-        f"<|assistant|>\n"
-    )
+    prompt = f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{flat_input}\n<|assistant|>\n"
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
@@ -114,7 +112,7 @@ def predict(model, tokenizer, flat_input: str) -> dict:
         return json.loads(raw)
     except json.JSONDecodeError:
         start = raw.find("{")
-        end   = raw.rfind("}") + 1
+        end = raw.rfind("}") + 1
         if start != -1 and end > start:
             try:
                 return json.loads(raw[start:end])
@@ -126,6 +124,7 @@ def predict(model, tokenizer, flat_input: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Mermaid ERD Export
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def to_mermaid(result: dict, title: str = "") -> str:
     """
@@ -184,10 +183,10 @@ def to_mermaid(result: dict, title: str = "") -> str:
     }
 
     for rel in result.get("relations", []):
-        from_e   = rel.get("from", "").upper().replace(" ", "_")
-        to_e     = rel.get("to",   "").upper().replace(" ", "_")
+        from_e = rel.get("from", "").upper().replace(" ", "_")
+        to_e = rel.get("to", "").upper().replace(" ", "_")
         rel_type = rel.get("type", "N:1")
-        arrow    = relation_map.get(rel_type, "}o--||")
+        arrow = relation_map.get(rel_type, "}o--||")
         lines.append(f'    {from_e} {arrow} {to_e} : "references"')
 
     return "\n".join(lines)
@@ -210,19 +209,19 @@ def _parse_attribute(attr: str) -> str:
         (other) → string
     """
     type_map = {
-        "number":  "int",
+        "number": "int",
         "integer": "int",
-        "int":     "int",
-        "text":    "string",
+        "int": "int",
+        "text": "string",
         "varchar": "string",
-        "char":    "string",
-        "string":  "string",
+        "char": "string",
+        "string": "string",
         "boolean": "boolean",
-        "bool":    "boolean",
-        "date":    "date",
-        "time":    "datetime",
-        "float":   "float",
-        "real":    "float",
+        "bool": "boolean",
+        "date": "date",
+        "time": "datetime",
+        "float": "float",
+        "real": "float",
         "decimal": "float",
     }
 
@@ -305,11 +304,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Flat Interface → Logical Data Model → Mermaid ERD"
     )
-    parser.add_argument("--input",    type=str, help="Flat interface description as string")
-    parser.add_argument("--file",     type=str, help="Path to a .txt file with the interface")
-    parser.add_argument("--output",   type=str, default="diagram.mmd", help="Output .mmd file path")
-    parser.add_argument("--title",    type=str, default="", help="Diagram title")
-    parser.add_argument("--examples", action="store_true", help="Run all built-in examples")
+    parser.add_argument(
+        "--input", type=str, help="Flat interface description as string"
+    )
+    parser.add_argument(
+        "--file", type=str, help="Path to a .txt file with the interface"
+    )
+    parser.add_argument(
+        "--output", type=str, default="diagram.mmd", help="Output .mmd file path"
+    )
+    parser.add_argument("--title", type=str, default="", help="Diagram title")
+    parser.add_argument(
+        "--examples", action="store_true", help="Run all built-in examples"
+    )
     args = parser.parse_args()
 
     model, tokenizer = load_model()
@@ -322,15 +329,19 @@ if __name__ == "__main__":
 
     elif args.input:
         flat_input = args.input.replace("\\n", "\n")
-        run_single(model, tokenizer, flat_input, title=args.title, output_path=args.output)
+        run_single(
+            model, tokenizer, flat_input, title=args.title, output_path=args.output
+        )
 
     elif args.examples:
         for name, flat_input in EXAMPLES:
             output_path = f"{name.lower()}.mmd"
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"Example: {name}")
-            print(f"{'='*60}")
-            run_single(model, tokenizer, flat_input, title=name, output_path=output_path)
+            print(f"{'=' * 60}")
+            run_single(
+                model, tokenizer, flat_input, title=name, output_path=output_path
+            )
 
     else:
         # Interactive mode
@@ -344,6 +355,10 @@ if __name__ == "__main__":
             print("Fields (comma-separated):")
             fields = input("> ").strip()
             flat_input = f"Interface: {name}\nFields: {fields}"
-            output_path = args.output if args.output != "diagram.mmd" else f"{name.lower()}.mmd"
-            run_single(model, tokenizer, flat_input, title=name, output_path=output_path)
+            output_path = (
+                args.output if args.output != "diagram.mmd" else f"{name.lower()}.mmd"
+            )
+            run_single(
+                model, tokenizer, flat_input, title=name, output_path=output_path
+            )
             print()
