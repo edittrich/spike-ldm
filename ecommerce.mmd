@@ -1,0 +1,101 @@
+---
+title: ecommerce
+---
+erDiagram
+    CUSTOMER {
+        string email
+        string first_name
+        string last_name
+        string phone
+        string created_at
+        string billing_address
+        string shipping_address
+        int id PK
+    }
+    CATEGORY {
+        int parent_category FK
+        int id PK
+        string name
+    }
+    PRODUCT {
+        string sku
+        int weight
+        int price
+        int stock_quantity
+        string description
+        int id PK
+        string name
+        int category FK
+        int supplier FK
+        string created_at
+    }
+    SUPPLIER {
+        string country
+        string phone
+        int id PK
+        string name
+        string email
+    }
+    ORDER {
+        string status
+        string payment_method
+        string discount_code
+        string shipped_at
+        int customer FK
+        int id PK
+        string created_at
+        string shipping_address
+        string status
+    }
+    ORDER_ITEM {
+        int unit_price
+        int discount
+        int order FK
+        int quantity
+        int id PK
+        int product FK
+    }
+    DISCOUNT {
+        string valid_until
+        string valid_from
+        string type
+        int value
+        int id PK
+    }
+    REVIEW {
+        string body
+        int rating
+        string title
+        int product FK
+        int customer FK
+        string created_at
+    }
+    SHIPMENT {
+        string status
+        string shipped_at
+        string carrier
+        int order FK
+        int id PK
+        string tracking_number
+        string delivered_at
+    }
+    INVOICE {
+        int total_amount
+        string due_at
+        string paid_at
+        int order FK
+        int customer FK
+        int id PK
+        string issued_at
+    }
+
+    PRODUCT }o--|| CATEGORY : "references"
+    PRODUCT }o--|| SUPPLIER : "references"
+    ORDER }o--|| CUSTOMER : "references"
+    ORDER_ITEM }o--|| ORDER : "references"
+    ORDER_ITEM }o--|| PRODUCT : "references"
+    REVIEW }o--|| PRODUCT : "references"
+    REVIEW }o--|| CUSTOMER : "references"
+    SHIPMENT }o--|| ORDER : "references"
+    INVOICE }o--|| ORDER : "references"
+    INVOICE }o--|| CUSTOMER : "references"

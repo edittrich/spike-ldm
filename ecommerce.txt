@@ -1,0 +1,29 @@
+Interface: customer
+Fields: id, first_name, last_name, email, phone, billing_address, shipping_address, created_at
+
+Interface: category
+Fields: id, name, parent_category
+
+Interface: product
+Fields: id, name, description, price, stock_quantity, category, supplier, sku, weight, created_at
+
+Interface: supplier
+Fields: id, name, email, phone, country, lead_time_days
+
+Interface: order
+Fields: id, customer, status, shipping_address, payment_method, discount_code, created_at, shipped_at
+
+Interface: order_item
+Fields: id, order, product, quantity, unit_price, discount
+
+Interface: discount
+Fields: id, code, type, value, valid_from, valid_until, min_order_value
+
+Interface: review
+Fields: id, product, customer, rating, title, body, created_at
+
+Interface: shipment
+Fields: id, order, carrier, tracking_number, status, shipped_at, delivered_at
+
+Interface: invoice
+Fields: id, order, customer, total_amount, tax_amount, issued_at, due_at, paid_at

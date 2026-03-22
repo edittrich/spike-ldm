@@ -7,10 +7,10 @@ result as a Mermaid ER diagram file.
 
 Usage:
     uv run python inference.py
-    uv run python inference.py --input "Interface: shop\nFields: id, name, price" --output shop.mmd
-    uv run python inference.py --file shop.txt --output shop.mmd
+    uv run python inference.py --input "Interface: shop\nFields: id, name, price" --output example.mmd
+    uv run python inference.py --file ecommerce.txt --output ecommerce.mmd
     uv run python inference.py --examples
-    uv run python inference.py --output my_diagram.mmd
+    uv run python inference.py --output example.mmd
 """
 
 import argparse
