@@ -2,8 +2,23 @@
 title: shop
 ---
 erDiagram
-    SHOP {
-        int id
-        string name
+    PRODUCT {
+        int id PK
         int price
+        string name
     }
+    CUSTOMER {
+        string email
+        int id PK
+        string name
+    }
+    ORDER {
+        int quantity
+        string date
+        int customer FK
+        int id PK
+        int product FK
+    }
+
+    ORDER }o--|| PRODUCT : "references"
+    ORDER }o--|| CUSTOMER : "references"

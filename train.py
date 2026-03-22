@@ -1,15 +1,16 @@
 """
 Fine-Tuning Pipeline: Flat Interfaces → Logical Data Model
 ============================================================
-Data source : HuggingFace richardr1126/spider-schema
-Strategy    : QLoRA 4-bit (16 GB VRAM)
-Model       : Qwen/Qwen2.5-7B-Instruct
+Data source 1: HuggingFace richardr1126/spider-schema (single flat interface)
+Data source 2: Synthetic multi-interface pairs with explicit FK references
+Strategy     : QLoRA 4-bit (16 GB VRAM)
+Model        : Qwen/Qwen2.5-7B-Instruct
 
 Usage:
-    deepspeed --num_gpus=1 train.py
+    uv run python train.py
 
 Requirements:
-    uv add torch --index-url https://download.pytorch.org/whl/cu128
+    uv add torch --index-url https://download.pytorch.org/whl/cu130
     uv add transformers datasets peft trl accelerate sentencepiece protobuf python-dotenv bitsandbytes
 """
 
@@ -19,13 +20,14 @@ import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import json
-
+import random
 import torch
-from datasets import Dataset, load_dataset
 from dotenv import load_dotenv
-from peft import LoraConfig, get_peft_model
+from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from trl import SFTConfig, SFTTrainer
+from peft import LoraConfig, get_peft_model
+from trl import SFTTrainer, SFTConfig
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Environment & Authentication
@@ -58,9 +60,8 @@ print(f"  Columns          : {spider_ds.column_names}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Schema Parsing Helpers
+# 2. Spider Schema Parsing Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-
 
 def parse_schema_text(schema_text: str) -> dict[str, list[tuple[str, str]]]:
     """
@@ -95,10 +96,8 @@ def parse_schema_text(schema_text: str) -> dict[str, list[tuple[str, str]]]:
 
 def schema_to_flat_input(row: dict) -> str:
     """
-    De-normalize a Spider schema into a flat interface description.
-    All columns from all tables are merged into a single field list —
-    this simulates the kind of flat API / CSV input the model will see
-    at inference time.
+    De-normalize a Spider schema into a single flat interface description.
+    All columns from all tables are merged into one field list.
 
     Example output:
         Interface: concert_singer
@@ -117,30 +116,16 @@ def schema_to_normalized_output(row: dict) -> str:
     The output contains:
       - entities : list of tables with typed attributes (PK / FK annotated)
       - relations: list of N:1 foreign-key relationships between tables
-
-    Example output (pretty-printed JSON):
-        {
-          "entities": [
-            {"name": "stadium", "attributes": ["Stadium_ID: number (PK)", ...]},
-            ...
-          ],
-          "relations": [
-            {"from": "concert", "to": "stadium", "type": "N:1"},
-            ...
-          ]
-        }
     """
     tables = parse_schema_text(row["Schema (values (type))"])
     pk_text = row["Primary Keys"]
     fk_text = row["Foreign Keys"]
 
-    # Build a lowercase set of primary key column names for fast lookup
     primary_keys: set[str] = set()
     if pk_text and pk_text.strip():
         for pk in pk_text.split(","):
             primary_keys.add(pk.strip().lower())
 
-    # Parse foreign key pairs: [(from_table.col, to_table.col), ...]
     fk_pairs: list[tuple[str, str]] = []
     if fk_text and fk_text.strip():
         for fk in fk_text.split(","):
@@ -149,10 +134,8 @@ def schema_to_normalized_output(row: dict) -> str:
                 left, right = fk.split("=")
                 fk_pairs.append((left.strip(), right.strip()))
 
-    # Build a lowercase set of FK column references for fast lookup
     fk_cols: set[str] = {left.lower() for left, _ in fk_pairs if "." in left}
 
-    # Build entity list with annotated attributes
     entities = []
     for table_name, cols in tables.items():
         attributes = []
@@ -167,7 +150,6 @@ def schema_to_normalized_output(row: dict) -> str:
             attributes.append(f"{col_name}: {col_type}{annotation}")
         entities.append({"name": table_name, "attributes": attributes})
 
-    # Build relation list from FK pairs
     relations = [
         {"from": left.split(".")[0], "to": right.split(".")[0], "type": "N:1"}
         for left, right in fk_pairs
@@ -182,35 +164,307 @@ def schema_to_normalized_output(row: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Build Training Pairs
+# 3. Synthetic Multi-Interface Training Data
+# ─────────────────────────────────────────────────────────────────────────────
+# These examples teach the model to:
+#   - Accept multiple named interfaces as input
+#   - Recognize FK references by field name matching table names
+#   - Build correct N:1 relations across interfaces
 # ─────────────────────────────────────────────────────────────────────────────
 
-print("\nBuilding training pairs...")
-training_pairs: list[dict] = []
+# Each entry is a tuple of (input_text, output_json_dict)
+# The input uses the multi-interface format the user wants to provide.
+MULTI_INTERFACE_EXAMPLES: list[tuple[str, dict]] = [
+
+    # ── E-Commerce ────────────────────────────────────────────────────────────
+    (
+        "Interface: product\nFields: id, name, price\n"
+        "Interface: customer\nFields: id, name, email\n"
+        "Interface: order\nFields: id, product, customer, quantity, date",
+        {
+            "entities": [
+                {"name": "product",  "attributes": ["id: number (PK)", "name: text", "price: number"]},
+                {"name": "customer", "attributes": ["id: number (PK)", "name: text", "email: text"]},
+                {"name": "order",    "attributes": ["id: number (PK)", "product: number (FK)",
+                                                    "customer: number (FK)", "quantity: number", "date: text"]},
+            ],
+            "relations": [
+                {"from": "order", "to": "product",  "type": "N:1"},
+                {"from": "order", "to": "customer", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Blog Platform ─────────────────────────────────────────────────────────
+    (
+        "Interface: author\nFields: id, name, email\n"
+        "Interface: category\nFields: id, name\n"
+        "Interface: post\nFields: id, title, body, author, category, created_at",
+        {
+            "entities": [
+                {"name": "author",   "attributes": ["id: number (PK)", "name: text", "email: text"]},
+                {"name": "category", "attributes": ["id: number (PK)", "name: text"]},
+                {"name": "post",     "attributes": ["id: number (PK)", "title: text", "body: text",
+                                                    "author: number (FK)", "category: number (FK)",
+                                                    "created_at: text"]},
+            ],
+            "relations": [
+                {"from": "post", "to": "author",   "type": "N:1"},
+                {"from": "post", "to": "category", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Hospital ──────────────────────────────────────────────────────────────
+    (
+        "Interface: doctor\nFields: id, name, specialty\n"
+        "Interface: patient\nFields: id, name, birthdate\n"
+        "Interface: appointment\nFields: id, doctor, patient, date, diagnosis",
+        {
+            "entities": [
+                {"name": "doctor",      "attributes": ["id: number (PK)", "name: text", "specialty: text"]},
+                {"name": "patient",     "attributes": ["id: number (PK)", "name: text", "birthdate: text"]},
+                {"name": "appointment", "attributes": ["id: number (PK)", "doctor: number (FK)",
+                                                       "patient: number (FK)", "date: text", "diagnosis: text"]},
+            ],
+            "relations": [
+                {"from": "appointment", "to": "doctor",  "type": "N:1"},
+                {"from": "appointment", "to": "patient", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── School ────────────────────────────────────────────────────────────────
+    (
+        "Interface: student\nFields: id, name, birthdate\n"
+        "Interface: teacher\nFields: id, name, subject\n"
+        "Interface: course\nFields: id, name, teacher\n"
+        "Interface: enrollment\nFields: id, student, course, grade, semester",
+        {
+            "entities": [
+                {"name": "student",    "attributes": ["id: number (PK)", "name: text", "birthdate: text"]},
+                {"name": "teacher",    "attributes": ["id: number (PK)", "name: text", "subject: text"]},
+                {"name": "course",     "attributes": ["id: number (PK)", "name: text", "teacher: number (FK)"]},
+                {"name": "enrollment", "attributes": ["id: number (PK)", "student: number (FK)",
+                                                      "course: number (FK)", "grade: text", "semester: text"]},
+            ],
+            "relations": [
+                {"from": "course",      "to": "teacher", "type": "N:1"},
+                {"from": "enrollment",  "to": "student", "type": "N:1"},
+                {"from": "enrollment",  "to": "course",  "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Library ───────────────────────────────────────────────────────────────
+    (
+        "Interface: book\nFields: id, title, isbn, author\n"
+        "Interface: author\nFields: id, name, country\n"
+        "Interface: member\nFields: id, name, email\n"
+        "Interface: loan\nFields: id, book, member, loan_date, return_date",
+        {
+            "entities": [
+                {"name": "book",   "attributes": ["id: number (PK)", "title: text", "isbn: text",
+                                                  "author: number (FK)"]},
+                {"name": "author", "attributes": ["id: number (PK)", "name: text", "country: text"]},
+                {"name": "member", "attributes": ["id: number (PK)", "name: text", "email: text"]},
+                {"name": "loan",   "attributes": ["id: number (PK)", "book: number (FK)",
+                                                  "member: number (FK)", "loan_date: text", "return_date: text"]},
+            ],
+            "relations": [
+                {"from": "book", "to": "author", "type": "N:1"},
+                {"from": "loan", "to": "book",   "type": "N:1"},
+                {"from": "loan", "to": "member", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Project Management ────────────────────────────────────────────────────
+    (
+        "Interface: employee\nFields: id, name, department\n"
+        "Interface: project\nFields: id, name, budget, manager\n"
+        "Interface: task\nFields: id, title, project, assignee, status, due_date",
+        {
+            "entities": [
+                {"name": "employee", "attributes": ["id: number (PK)", "name: text", "department: text"]},
+                {"name": "project",  "attributes": ["id: number (PK)", "name: text", "budget: number",
+                                                    "manager: number (FK)"]},
+                {"name": "task",     "attributes": ["id: number (PK)", "title: text",
+                                                    "project: number (FK)", "assignee: number (FK)",
+                                                    "status: text", "due_date: text"]},
+            ],
+            "relations": [
+                {"from": "project", "to": "employee", "type": "N:1"},
+                {"from": "task",    "to": "project",  "type": "N:1"},
+                {"from": "task",    "to": "employee", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Music Streaming ───────────────────────────────────────────────────────
+    (
+        "Interface: artist\nFields: id, name, genre\n"
+        "Interface: album\nFields: id, title, artist, release_year\n"
+        "Interface: track\nFields: id, title, album, duration, plays",
+        {
+            "entities": [
+                {"name": "artist", "attributes": ["id: number (PK)", "name: text", "genre: text"]},
+                {"name": "album",  "attributes": ["id: number (PK)", "title: text",
+                                                  "artist: number (FK)", "release_year: number"]},
+                {"name": "track",  "attributes": ["id: number (PK)", "title: text",
+                                                  "album: number (FK)", "duration: number", "plays: number"]},
+            ],
+            "relations": [
+                {"from": "album", "to": "artist", "type": "N:1"},
+                {"from": "track", "to": "album",  "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Inventory ─────────────────────────────────────────────────────────────
+    (
+        "Interface: supplier\nFields: id, name, country\n"
+        "Interface: warehouse\nFields: id, location, capacity\n"
+        "Interface: product\nFields: id, name, supplier, price\n"
+        "Interface: stock\nFields: id, product, warehouse, quantity",
+        {
+            "entities": [
+                {"name": "supplier",  "attributes": ["id: number (PK)", "name: text", "country: text"]},
+                {"name": "warehouse", "attributes": ["id: number (PK)", "location: text", "capacity: number"]},
+                {"name": "product",   "attributes": ["id: number (PK)", "name: text",
+                                                     "supplier: number (FK)", "price: number"]},
+                {"name": "stock",     "attributes": ["id: number (PK)", "product: number (FK)",
+                                                     "warehouse: number (FK)", "quantity: number"]},
+            ],
+            "relations": [
+                {"from": "product", "to": "supplier",  "type": "N:1"},
+                {"from": "stock",   "to": "product",   "type": "N:1"},
+                {"from": "stock",   "to": "warehouse", "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Forum ─────────────────────────────────────────────────────────────────
+    (
+        "Interface: user\nFields: id, username, email\n"
+        "Interface: thread\nFields: id, title, user, category, created_at\n"
+        "Interface: reply\nFields: id, thread, user, body, created_at",
+        {
+            "entities": [
+                {"name": "user",   "attributes": ["id: number (PK)", "username: text", "email: text"]},
+                {"name": "thread", "attributes": ["id: number (PK)", "title: text", "user: number (FK)",
+                                                  "category: text", "created_at: text"]},
+                {"name": "reply",  "attributes": ["id: number (PK)", "thread: number (FK)",
+                                                  "user: number (FK)", "body: text", "created_at: text"]},
+            ],
+            "relations": [
+                {"from": "thread", "to": "user",   "type": "N:1"},
+                {"from": "reply",  "to": "thread", "type": "N:1"},
+                {"from": "reply",  "to": "user",   "type": "N:1"},
+            ],
+        },
+    ),
+
+    # ── Real Estate ───────────────────────────────────────────────────────────
+    (
+        "Interface: agent\nFields: id, name, license_number\n"
+        "Interface: property\nFields: id, address, price, agent\n"
+        "Interface: buyer\nFields: id, name, email\n"
+        "Interface: offer\nFields: id, property, buyer, amount, status, date",
+        {
+            "entities": [
+                {"name": "agent",    "attributes": ["id: number (PK)", "name: text", "license_number: text"]},
+                {"name": "property", "attributes": ["id: number (PK)", "address: text", "price: number",
+                                                    "agent: number (FK)"]},
+                {"name": "buyer",    "attributes": ["id: number (PK)", "name: text", "email: text"]},
+                {"name": "offer",    "attributes": ["id: number (PK)", "property: number (FK)",
+                                                    "buyer: number (FK)", "amount: number",
+                                                    "status: text", "date: text"]},
+            ],
+            "relations": [
+                {"from": "property", "to": "agent",    "type": "N:1"},
+                {"from": "offer",    "to": "property", "type": "N:1"},
+                {"from": "offer",    "to": "buyer",    "type": "N:1"},
+            ],
+        },
+    ),
+]
+
+
+def build_multi_interface_pairs(
+    examples: list[tuple[str, dict]],
+    repeat: int = 5,
+) -> list[dict]:
+    """
+    Convert the static multi-interface examples into training pairs.
+
+    Args:
+        examples: list of (input_text, output_dict) tuples
+        repeat  : how many times to repeat each example (with light shuffling)
+                  to increase dataset size and reduce overfitting
+
+    Returns:
+        list of {"input": str, "output": str} dicts
+    """
+    pairs = []
+    random.seed(42)
+
+    for flat_input, output_dict in examples:
+        for _ in range(repeat):
+            # Shuffle entity attribute order slightly so the model generalizes
+            shuffled = output_dict.copy()
+            shuffled["entities"] = [
+                {**e, "attributes": random.sample(e["attributes"], len(e["attributes"]))}
+                for e in output_dict["entities"]
+            ]
+            pairs.append({
+                "input":  flat_input,
+                "output": json.dumps(shuffled, indent=2, ensure_ascii=False),
+            })
+
+    print(f"  Multi-interface pairs generated: {len(pairs)} "
+          f"({len(examples)} templates × {repeat} repeats)")
+    return pairs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Build Combined Training Dataset
+# ─────────────────────────────────────────────────────────────────────────────
+
+print("\nBuilding training pairs from Spider schemas...")
+spider_pairs: list[dict] = []
 
 for row in spider_ds:
     try:
-        training_pairs.append(
-            {
-                "input": schema_to_flat_input(row),
-                "output": schema_to_normalized_output(row),
-            }
-        )
+        spider_pairs.append({
+            "input":  schema_to_flat_input(row),
+            "output": schema_to_normalized_output(row),
+        })
     except Exception as exc:
         print(f"  Skipping '{row.get('db_id', '?')}': {exc}")
 
-print(f"  Training pairs created: {len(training_pairs)}")
-print("\n--- Sample input ---")
-print(training_pairs[0]["input"])
-print("\n--- Sample output ---")
-print(training_pairs[0]["output"])
+print(f"  Spider pairs: {len(spider_pairs)}")
+
+print("\nBuilding multi-interface training pairs...")
+multi_pairs = build_multi_interface_pairs(MULTI_INTERFACE_EXAMPLES, repeat=50)
+
+# Combine and shuffle both sources
+all_pairs = spider_pairs[::2] + multi_pairs  # use every 2nd Spider pair to balance dataset
+random.seed(42)
+random.shuffle(all_pairs)
+
+print(f"\n  Total training pairs: {len(all_pairs)}")
+print("\n--- Spider sample input ---")
+print(spider_pairs[0]["input"])
+print("\n--- Multi-interface sample input ---")
+print(multi_pairs[0]["input"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Dataset Split
+# 5. Dataset Split
 # ─────────────────────────────────────────────────────────────────────────────
 
-hf_dataset = Dataset.from_list(training_pairs)
+hf_dataset = Dataset.from_list(all_pairs)
 hf_dataset = hf_dataset.train_test_split(test_size=0.1, seed=42)
 
 print(f"\n  Train size : {len(hf_dataset['train'])}")
@@ -218,15 +472,16 @@ print(f"  Test size  : {len(hf_dataset['test'])}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Prompt Formatting (ChatML)
+# 6. Prompt Formatting (ChatML)
 # ─────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = (
     "You are a database architect. "
     "Analyze flat interface descriptions and produce normalized logical data "
-    "models as JSON. The JSON must contain 'entities' (with typed attributes "
-    "annotated as PK or FK where applicable) and 'relations' "
-    "(with from, to, and type fields)."
+    "models as JSON. The input may contain one or multiple named interfaces. "
+    "When a field name matches another interface name, treat it as a foreign key. "
+    "The JSON must contain 'entities' (with typed attributes annotated as PK or FK "
+    "where applicable) and 'relations' (with from, to, and type fields)."
 )
 
 
@@ -245,11 +500,10 @@ hf_dataset = hf_dataset.map(format_for_training)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. Model & Tokenizer
+# 7. Model & Tokenizer
 # ─────────────────────────────────────────────────────────────────────────────
 # QLoRA: 4-bit quantization via bitsandbytes reduces the 7B model from
-# ~14 GB (bfloat16) to ~4.5 GB, leaving enough headroom for gradients
-# and activations on a 16 GB VRAM GPU.
+# ~14 GB (bfloat16) to ~4.5 GB, leaving enough headroom on a 16 GB GPU.
 # ─────────────────────────────────────────────────────────────────────────────
 
 MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
@@ -260,7 +514,7 @@ bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True,  # nested quantization saves ~0.4 GB
+    bnb_4bit_use_double_quant=True,        # nested quantization saves ~0.4 GB
 )
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, token=token)
@@ -274,17 +528,17 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     token=token,
 )
-model.config.use_cache = False  # required for gradient checkpointing
+model.config.use_cache = False             # required for gradient checkpointing
 model.config.pad_token_id = tokenizer.pad_token_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 7. LoRA Configuration
+# 8. LoRA Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
 lora_config = LoraConfig(
-    r=16,  # LoRA rank
-    lora_alpha=32,  # scaling factor
+    r=16,                                               # LoRA rank
+    lora_alpha=32,                                      # scaling factor
     target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
     lora_dropout=0.05,
     bias="none",
@@ -296,29 +550,29 @@ model.print_trainable_parameters()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Training
+# 9. Training
 # ─────────────────────────────────────────────────────────────────────────────
 # Effective batch size = per_device_train_batch_size × gradient_accumulation_steps
 #                      = 1 × 16 = 16
 # ─────────────────────────────────────────────────────────────────────────────
 
 training_args = SFTConfig(
-    output_dir="./datamodel-lora",
-    num_train_epochs=3,
+    output_dir="./ldm-expert-lora",
+    num_train_epochs=5,
     per_device_train_batch_size=1,
-    gradient_accumulation_steps=16,  # effective batch size = 16
+    gradient_accumulation_steps=16,        # effective batch size = 16
     learning_rate=2e-4,
-    warmup_ratio=0.03,
+    warmup_steps=10,
     lr_scheduler_type="cosine",
     bf16=True,
     logging_steps=10,
     save_strategy="epoch",
     eval_strategy="epoch",
     load_best_model_at_end=True,
-    report_to="none",  # set to "wandb" for experiment tracking
+    report_to="none",                      # set to "wandb" for experiment tracking
     dataset_text_field="text",
     max_length=512,
-    gradient_checkpointing=True,  # trades compute for memory savings
+    gradient_checkpointing=True,           # trades compute for memory savings
 )
 
 trainer = SFTTrainer(
@@ -333,25 +587,22 @@ print("\nStarting training...")
 trainer.train()
 
 # Save the LoRA adapter and tokenizer
-trainer.model.save_pretrained("./datamodel-lora/final")
-tokenizer.save_pretrained("./datamodel-lora/final")
-print("Model saved to: ./datamodel-lora/final")
+trainer.model.save_pretrained("./ldm-expert-lora/final")
+tokenizer.save_pretrained("./ldm-expert-lora/final")
+print("Model saved to: ./ldm-expert-lora/final")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. Inference Test
+# 10. Inference Test
 # ─────────────────────────────────────────────────────────────────────────────
-# For standalone inference (without retraining), load the adapter like this:
-#
-#   from peft import PeftModel
-#   base  = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.bfloat16)
-#   model = PeftModel.from_pretrained(base, "./datamodel-lora/final")
-# ─────────────────────────────────────────────────────────────────────────────
-
 
 def predict(flat_input: str) -> str:
     """Run inference on a flat interface description and return the data model JSON."""
-    prompt = f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{flat_input}\n<|assistant|>\n"
+    prompt = (
+        f"<|system|>\n{SYSTEM_PROMPT}\n"
+        f"<|user|>\n{flat_input}\n"
+        f"<|assistant|>\n"
+    )
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         outputs = model.generate(
@@ -365,13 +616,13 @@ def predict(flat_input: str) -> str:
     return decoded.split("<|assistant|>")[-1].strip()
 
 
+# Test with the exact format the user reported as failing
 test_input = (
-    "Interface: webshop\n"
-    "Fields: order_id, customer_name, customer_email, "
-    "product_name, product_price, quantity, order_date, "
-    "shipping_address, payment_method"
+    "Interface: product\nFields: id, name, price\n"
+    "Interface: customer\nFields: id, name, email\n"
+    "Interface: order\nFields: id, product, customer, quantity, date"
 )
 
-print("\n--- Inference Test ---")
+print("\n--- Inference Test (multi-interface) ---")
 print("Input :", test_input)
 print("Output:", predict(test_input))

@@ -1,2 +1,6 @@
-Interface: shop
+Interface: product
 Fields: id, name, price
+Interface: customer
+Fields: id, name, email
+Interface: order
+Fields: id, product, customer, quantity, date

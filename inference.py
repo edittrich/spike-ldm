@@ -30,7 +30,7 @@ load_dotenv()
 token = os.getenv("HF_TOKEN")
 
 BASE_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"
-ADAPTER_PATH  = "./datamodel-lora/final"
+ADAPTER_PATH  = "./ldm-expert-lora/final"
 
 SYSTEM_PROMPT = (
     "You are a database architect. "
