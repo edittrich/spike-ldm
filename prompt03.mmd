@@ -1,0 +1,50 @@
+erDiagram
+    ORGANIZATION {
+        INT org_id PK
+        VARCHAR name
+        VARCHAR tax_id
+    }
+    CONTACT_PERSON {
+        INT contact_id PK
+        INT org_id FK
+        VARCHAR person_name
+        VARCHAR role
+        VARCHAR phone_number
+    }
+    SUBSCRIPTION_PLAN {
+        INT plan_id PK
+        VARCHAR plan_name
+        DECIMAL price
+    }
+    SUBSCRIPTION {
+        INT subscription_id PK
+        INT org_id FK
+        INT plan_id FK
+        DATETIME start_date
+        VARCHAR status
+    }
+    INVOICE {
+        INT invoice_id PK
+        INT subscription_id FK
+        DECIMAL amount
+        DATE due_date
+        VARCHAR paid_status
+    }
+    SERVICE_TICKET {
+        INT ticket_id PK
+        INT org_id FK
+        INT agent_id FK
+        VARCHAR priority
+        TEXT description
+    }
+    AGENT {
+        INT agent_id PK
+        VARCHAR name
+    }
+
+    ORGANIZATION ||--o{ CONTACT_PERSON : "has"
+    SUBSCRIPTION_PLAN ||--o{ SUBSCRIPTION : "offers"
+    ORGANIZATION ||--o{ SUBSCRIPTION : "subscribes to"
+    SUBSCRIPTION ||--o{ INVOICE : "generates"
+    ORGANIZATION ||--o{ SERVICE_TICKET : "raises"
+    AGENT ||--o{ SERVICE_TICKET : "handles"

@@ -1,0 +1,40 @@
+erDiagram
+    CUSTOMER {
+        int customer_id PK
+        varchar(255) customer_name
+        varchar(50) customer_tier
+    }
+    
+    ORDER {
+        int order_id PK
+        date order_date
+        int customer_id FK
+        int shipping_address_id FK
+    }
+
+    PRODUCT {
+        int product_id PK
+        varchar(255) product_name
+        varchar(100) product_category
+    }
+
+    SHIPPING_ADDRESS {
+        int shipping_address_id PK
+        varchar(255) street
+        varchar(100) city
+        varchar(20) zip_code
+    }
+    
+    ORDER_LINE {
+        int order_line_id PK
+        int order_id FK
+        int product_id FK
+        int quantity
+        decimal unit_price
+        decimal line_total
+    }
+
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--o{ ORDER_LINE : contains
+    PRODUCT ||--o{ ORDER_LINE : included_in
+    ORDER }o--|| SHIPPING_ADDRESS : ships_to

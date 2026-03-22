@@ -1,0 +1,36 @@
+erDiagram
+    LEAD_SOURCE {
+        VARCHAR source_name PK
+    }
+    COMPANY {
+        VARCHAR name PK
+        VARCHAR industry
+    }
+    CONTACT {
+        INT contact_id PK
+        VARCHAR person_name
+        VARCHAR phone_number
+    }
+    SALES_REP {
+        INT rep_id PK
+        VARCHAR rep_name
+    }
+    LEAD {
+        INT lead_id PK
+        VARCHAR source_name FK
+        VARCHAR company_name FK
+        INT contact_id FK
+        INT rep_id FK
+    }
+    MEETING {
+        INT meeting_id PK
+        INT lead_id FK
+        DATETIME date
+        TEXT notes
+    }
+
+    LEAD_SOURCE ||--o{ LEAD : "generates"
+    COMPANY ||--o{ LEAD : "has"
+    CONTACT ||--o{ LEAD : "contacts"
+    SALES_REP ||--o{ LEAD : "assigned to"
+    LEAD ||--o{ MEETING : "scheduled for"
