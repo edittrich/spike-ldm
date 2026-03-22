@@ -19,13 +19,13 @@ import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
 import json
-import torch
-from dotenv import load_dotenv
-from datasets import load_dataset, Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-from peft import LoraConfig, get_peft_model
-from trl import SFTTrainer, SFTConfig
 
+import torch
+from datasets import Dataset, load_dataset
+from dotenv import load_dotenv
+from peft import LoraConfig, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from trl import SFTConfig, SFTTrainer
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Environment & Authentication
@@ -60,6 +60,7 @@ print(f"  Columns          : {spider_ds.column_names}")
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Schema Parsing Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def parse_schema_text(schema_text: str) -> dict[str, list[tuple[str, str]]]:
     """
@@ -259,7 +260,7 @@ bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.bfloat16,
-    bnb_4bit_use_double_quant=True,        # nested quantization saves ~0.4 GB
+    bnb_4bit_use_double_quant=True,  # nested quantization saves ~0.4 GB
 )
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_fast=True, token=token)
@@ -273,7 +274,7 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     token=token,
 )
-model.config.use_cache = False             # required for gradient checkpointing
+model.config.use_cache = False  # required for gradient checkpointing
 model.config.pad_token_id = tokenizer.pad_token_id
 
 
@@ -282,8 +283,8 @@ model.config.pad_token_id = tokenizer.pad_token_id
 # ─────────────────────────────────────────────────────────────────────────────
 
 lora_config = LoraConfig(
-    r=16,                                               # LoRA rank
-    lora_alpha=32,                                      # scaling factor
+    r=16,  # LoRA rank
+    lora_alpha=32,  # scaling factor
     target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
     lora_dropout=0.05,
     bias="none",
@@ -305,7 +306,7 @@ training_args = SFTConfig(
     output_dir="./datamodel-lora",
     num_train_epochs=3,
     per_device_train_batch_size=1,
-    gradient_accumulation_steps=16,        # effective batch size = 16
+    gradient_accumulation_steps=16,  # effective batch size = 16
     learning_rate=2e-4,
     warmup_ratio=0.03,
     lr_scheduler_type="cosine",
@@ -314,10 +315,10 @@ training_args = SFTConfig(
     save_strategy="epoch",
     eval_strategy="epoch",
     load_best_model_at_end=True,
-    report_to="none",                      # set to "wandb" for experiment tracking
+    report_to="none",  # set to "wandb" for experiment tracking
     dataset_text_field="text",
     max_length=512,
-    gradient_checkpointing=True,           # trades compute for memory savings
+    gradient_checkpointing=True,  # trades compute for memory savings
 )
 
 trainer = SFTTrainer(
@@ -347,13 +348,10 @@ print("Model saved to: ./datamodel-lora/final")
 #   model = PeftModel.from_pretrained(base, "./datamodel-lora/final")
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def predict(flat_input: str) -> str:
     """Run inference on a flat interface description and return the data model JSON."""
-    prompt = (
-        f"<|system|>\n{SYSTEM_PROMPT}\n"
-        f"<|user|>\n{flat_input}\n"
-        f"<|assistant|>\n"
-    )
+    prompt = f"<|system|>\n{SYSTEM_PROMPT}\n<|user|>\n{flat_input}\n<|assistant|>\n"
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     with torch.no_grad():
         outputs = model.generate(
