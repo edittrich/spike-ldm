@@ -17,6 +17,7 @@ Prompt03
 "Generate a logical model for this attributes: org_id, org_name, org_tax_id, contact_person_1_name, contact_person_1_role, contact_person_1_phone, contact_person_2_name, contact_person_2_role, contact_person_2_phone, subscription_plan_id, subscription_start_date, subscription_status, invoice_id, invoice_amount, invoice_due_date, invoice_paid_status, service_ticket_id, service_ticket_priority, service_ticket_desc, assigned_agent_id, assigned_agent_name."
 
 # Train
+https://claude.ai/share/fd7328a0-ad82-4b02-bd10-cff7ac5589c9
     uv add --dev ruff
     uv add torch
     uv add accelerate bitsandbytes datasets peft protobuf python-dotenv sentencepiece transformers trl
